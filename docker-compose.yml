@@ -1,0 +1,117 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LocalWP Docker Compose
+# ─────────────────────────────────────────────────────────────────────────────
+# All configuration lives in .env  – copy .env.example to .env to get started.
+#
+# Web-server selection is done through Docker Compose profiles.
+# Set  COMPOSE_PROFILES=apache  (default) or  COMPOSE_PROFILES=nginx  in .env.
+#
+# Usage:
+#   docker compose up          # starts the site (import happens automatically)
+#   docker compose up --build  # rebuild after changing PHP_VERSION or WEB_SERVER
+#   ./export.sh                # create a LocalWP-compatible zip from the running site
+
+services:
+
+  # ── Database ───────────────────────────────────────────────────────────────
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-wordpress}
+      MYSQL_USER: ${MYSQL_USER:-wordpress}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-wordpress}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD
+        - mysqladmin
+        - ping
+        - -h
+        - localhost
+        - -u
+        - ${MYSQL_USER:-wordpress}
+        - -p${MYSQL_PASSWORD:-wordpress}
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # ── WordPress (Apache) ─────────────────────────────────────────────────────
+  # Active when COMPOSE_PROFILES=apache  (the default)
+  wordpress:
+    profiles: [apache]
+    build:
+      context: .
+      args:
+        PHP_VERSION: ${PHP_VERSION:-8.2}
+        WEB_SERVER: apache
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE:-wordpress}
+      WORDPRESS_DB_USER: ${MYSQL_USER:-wordpress}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD:-wordpress}
+      LOCAL_URL: ${LOCAL_URL:-http://localhost:8080}
+    volumes:
+      - wp_data:/var/www/html
+      - ./import:/import:ro
+
+  # ── WordPress (PHP-FPM, for use with nginx) ────────────────────────────────
+  # Active when COMPOSE_PROFILES=nginx
+  wordpress-fpm:
+    profiles: [nginx]
+    build:
+      context: .
+      args:
+        PHP_VERSION: ${PHP_VERSION:-8.2}
+        WEB_SERVER: fpm
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE:-wordpress}
+      WORDPRESS_DB_USER: ${MYSQL_USER:-wordpress}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD:-wordpress}
+      LOCAL_URL: ${LOCAL_URL:-http://localhost:8080}
+    volumes:
+      - wp_data:/var/www/html
+      - ./import:/import:ro
+
+  # ── nginx (reverse proxy / static files for FPM) ──────────────────────────
+  # Active when COMPOSE_PROFILES=nginx
+  nginx:
+    profiles: [nginx]
+    image: nginx:alpine
+    restart: unless-stopped
+    depends_on:
+      - wordpress-fpm
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    volumes:
+      - wp_data:/var/www/html:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # ── phpMyAdmin ─────────────────────────────────────────────────────────────
+  phpmyadmin:
+    image: phpmyadmin:latest
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: db
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+
+volumes:
+  db_data:
+  wp_data:

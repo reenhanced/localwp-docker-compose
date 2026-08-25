@@ -1,0 +1,10 @@
+# Keep the Docker build context lean
+.git
+.gitignore
+README.md
+import/
+nginx/
+docker-compose*.yml
+.env
+*.md
+export.sh

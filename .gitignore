@@ -1,0 +1,8 @@
+# Docker Compose override (user-specific, not committed)
+docker-compose.override.yml
+
+# LocalWP zip files – potentially large; users add them locally
+import/*.zip
+
+# macOS
+.DS_Store
