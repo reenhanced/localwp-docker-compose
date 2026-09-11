@@ -24,7 +24,28 @@ git clone https://github.com/reenhanced/localwp-docker-compose.git
 cd localwp-docker-compose
 ```
 
-### 2. Add your LocalWP zip
+### 2. Run against an expanded LocalWP site directory (recommended for git)
+
+From the root of an expanded LocalWP export (directory containing `app/public`):
+
+```bash
+/path/to/localwp-docker-compose/run.sh .
+```
+
+The command starts the stack, streams logs, and keeps your terminal attached.
+When you exit logs (`Ctrl+C`), it asks whether to save changes back into that
+directory (including a fresh `app/sql/local.sql` dump).
+
+### 3. Run against a LocalWP zip file directly
+
+```bash
+./run.sh /absolute/path/to/my-site.zip
+```
+
+The zip is used as input for the run, and when the session ends you can choose
+to write all changes back into the same zip file.
+
+### 4. Alternative legacy flow: add your LocalWP zip to `import/`
 
 Export your site from LocalWP (**Right-click site → Export**), then copy the resulting
 `.zip` into the `import/` directory:
@@ -44,7 +65,7 @@ my-site.zip
         └── local.sql  ← database dump
 ```
 
-### 3. Configure (optional)
+### 5. Configure (optional)
 
 Edit `.env` to set your preferences:
 
@@ -59,7 +80,7 @@ Edit `.env` to set your preferences:
 | `MYSQL_PASSWORD`   | `wordpress`                | MySQL password                                 |
 | `MYSQL_ROOT_PASSWORD` | `rootpassword`          | MySQL root password                            |
 
-### 4. Start the site
+### 6. Start the site
 
 ```bash
 docker compose up
