@@ -1,0 +1,30 @@
+{
+  "name": "localwp-docker-compose",
+  "version": "1.0.0",
+  "description": "Run [LocalWP](https://localwp.com/)-compatible zip files in Docker Compose — no LocalWP installation required.",
+  "bin": {
+    "localwp-docker-compose": "./run.sh"
+  },
+  "files": [
+    "run.sh",
+    "docker-compose.yml",
+    "Dockerfile",
+    "entrypoint.sh",
+    "init.sh",
+    "export.sh",
+    "nginx/default.conf",
+    "README.md"
+  ],
+  "scripts": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/reenhanced/localwp-docker-compose.git"
+  },
+  "keywords": [
+    "localwp",
+    "wordpress",
+    "docker-compose"
+  ],
+  "author": "",
+  "license": "ISC"
+}

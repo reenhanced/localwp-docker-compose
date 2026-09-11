@@ -2,6 +2,23 @@
 
 Run [LocalWP](https://localwp.com/)-compatible zip files in Docker Compose — no LocalWP installation required.
 
+## Install as a command (no `cd` required)
+
+Install globally:
+
+```bash
+npm install -g git+https://github.com/reenhanced/localwp-docker-compose.git
+```
+
+Then run from any directory:
+
+```bash
+localwp-docker-compose /absolute/path/to/site.zip
+# or from an expanded LocalWP export root:
+cd /path/to/site-folder
+localwp-docker-compose .
+```
+
 ## Features
 
 - **One-command start**: `docker compose up` automatically imports your zip and starts WordPress.
