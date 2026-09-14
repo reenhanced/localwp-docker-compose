@@ -103,10 +103,14 @@ add_action( 'init', function () {
     if ( '' === $raw_key ) {
         return;
     }
-    $key     = sanitize_key( $raw_key );
-    $user_id = get_transient( 'localwp_autologin_' . $key );
+    // Not sanitize_key(): that lowercases, and the generated tokens are
+    // mixed-case, so the lookup key would never match the stored transient.
+    if ( ! preg_match( '/^[A-Za-z0-9]{1,64}$/', $raw_key ) ) {
+        return;
+    }
+    $user_id = get_transient( 'localwp_autologin_' . $raw_key );
     if ( false !== $user_id ) {
-        delete_transient( 'localwp_autologin_' . $key );
+        delete_transient( 'localwp_autologin_' . $raw_key );
         wp_set_auth_cookie( (int) $user_id, false );
         wp_safe_redirect( admin_url() );
         exit;
