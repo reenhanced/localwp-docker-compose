@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() { echo "[run] $*"; }
 die() { echo "[run] ERROR: $*" >&2; exit 1; }
@@ -111,6 +110,13 @@ require_cmd docker
 require_cmd zip
 require_cmd unzip
 require_cmd python3
+
+# npm installs the command as a symlink outside the package directory.
+SCRIPT_DIR=$(python3 - "${BASH_SOURCE[0]}" <<'PY'
+import os, sys
+print(os.path.dirname(os.path.realpath(sys.argv[1])))
+PY
+)
 
 TARGET_INPUT="$PWD"
 UP_ARGS=()
