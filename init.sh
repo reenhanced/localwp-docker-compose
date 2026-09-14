@@ -9,6 +9,18 @@ set -euo pipefail
 WP_DIR=/var/www/html
 IMPORT_DIR=/import
 LOCK_FILE="${WP_DIR}/.localwp-docker-init-done"
+if [ "${LOCALWP_LIVE_FILES:-0}" = 1 ]; then
+    LOCK_FILE=/localwp-state/.localwp-docker-init-done
+    mkdir -p "$(dirname "$LOCK_FILE")"
+fi
+
+# Only files we generate or modify need ownership changes on the host bind.
+live_file_permissions() {
+    if [ "${LOCALWP_LIVE_FILES:-0}" = 1 ]; then
+        chown "${LOCALWP_HOST_UID}:${LOCALWP_HOST_GID}" "$@"
+        chmod u+rw "$@"
+    fi
+}
 
 LOCAL_URL="${LOCAL_URL:-http://localhost:8080}"
 # Strip trailing slash
@@ -35,10 +47,40 @@ wait_for_mysql() {
     log "MySQL is ready."
 }
 
+configure_wordpress() {
+    if [ ! -f "${WP_DIR}/wp-config.php" ] && [ -f "${WP_DIR}/wp-config-sample.php" ]; then
+        log "Generating wp-config.php from sample …"
+        cp "${WP_DIR}/wp-config-sample.php" "${WP_DIR}/wp-config.php"
+    fi
+
+    if [ -f "${WP_DIR}/wp-config.php" ]; then
+        log "Patching database credentials in wp-config.php …"
+        sed -i "s|define[[:space:]]*([[:space:]]*'DB_NAME'[^)]*)|define('DB_NAME', '${WORDPRESS_DB_NAME}')|" \
+            "${WP_DIR}/wp-config.php"
+        sed -i "s|define[[:space:]]*([[:space:]]*'DB_USER'[^)]*)|define('DB_USER', '${WORDPRESS_DB_USER}')|" \
+            "${WP_DIR}/wp-config.php"
+        sed -i "s|define[[:space:]]*([[:space:]]*'DB_PASSWORD'[^)]*)|define('DB_PASSWORD', '${WORDPRESS_DB_PASSWORD}')|" \
+            "${WP_DIR}/wp-config.php"
+        sed -i "s|define[[:space:]]*([[:space:]]*'DB_HOST'[^)]*)|define('DB_HOST', 'db')|" \
+            "${WP_DIR}/wp-config.php"
+        live_file_permissions "${WP_DIR}/wp-config.php"
+    fi
+}
+
 # ── Install the auto-login mu-plugin ──────────────────────────────────────────
 install_autologin_plugin() {
     local mu_dir="${WP_DIR}/wp-content/mu-plugins"
-    mkdir -p "$mu_dir"
+    if [ "${LOCALWP_LIVE_FILES:-0}" = 1 ]; then
+        local dir
+        for dir in "${WP_DIR}/wp-content" "$mu_dir"; do
+            if [ ! -d "$dir" ]; then
+                mkdir -p "$dir"
+                live_file_permissions "$dir"
+            fi
+        done
+    else
+        mkdir -p "$mu_dir"
+    fi
     cat > "${mu_dir}/localwp-autologin.php" <<'PHPEOF'
 <?php
 /**
@@ -60,6 +102,7 @@ add_action( 'init', function () {
     }
 } );
 PHPEOF
+    live_file_permissions "${mu_dir}/localwp-autologin.php"
 }
 
 # ── Generate a one-click admin login URL ──────────────────────────────────────
@@ -115,6 +158,9 @@ print_banner() {
 
 if [ -f "$LOCK_FILE" ]; then
     log "Site already initialised – skipping import."
+    if [ "${LOCALWP_LIVE_FILES:-0}" = 1 ]; then
+        configure_wordpress
+    fi
     install_autologin_plugin
     wait_for_mysql
     ADMIN_URL=$(generate_admin_url)
@@ -128,7 +174,13 @@ ZIP_FILE=$(find "$IMPORT_DIR" -maxdepth 1 -name "*.zip" 2>/dev/null | head -n1 |
 if [ -z "$ZIP_FILE" ]; then
     log "No zip file found in ${IMPORT_DIR}/."
     log "Place a LocalWP-compatible zip file in the 'import/' directory and restart."
-    log "The site will start with a default WordPress installation."
+    if [ "${LOCALWP_LIVE_FILES:-0}" = 1 ]; then
+        log "Using live WordPress files without importing a database."
+        configure_wordpress
+        install_autologin_plugin
+    else
+        log "The site will start with a default WordPress installation."
+    fi
     wait_for_mysql
     print_banner "${LOCAL_URL}/wp-admin/"
     exit 0
@@ -144,24 +196,28 @@ unzip -q "$ZIP_FILE" -d "$TMPDIR"
 
 # LocalWP puts WordPress files in  app/public/
 # Some exporters may use  public/  or just  /
-WP_SOURCE=""
-for candidate in \
-    "${TMPDIR}/app/public" \
-    "${TMPDIR}/public" \
-    "${TMPDIR}"; do
-    if [ -f "${candidate}/wp-login.php" ] || [ -f "${candidate}/index.php" ]; then
-        WP_SOURCE="$candidate"
-        break
-    fi
-done
+if [ "${LOCALWP_LIVE_FILES:-0}" != 1 ]; then
+    WP_SOURCE=""
+    for candidate in \
+        "${TMPDIR}/app/public" \
+        "${TMPDIR}/public" \
+        "${TMPDIR}"; do
+        if [ -f "${candidate}/wp-login.php" ] || [ -f "${candidate}/index.php" ]; then
+            WP_SOURCE="$candidate"
+            break
+        fi
+    done
 
-if [ -z "$WP_SOURCE" ]; then
-    warn "Could not locate WordPress files inside the zip (expected app/public/index.php)."
+    if [ -z "$WP_SOURCE" ]; then
+        warn "Could not locate WordPress files inside the zip (expected app/public/index.php)."
+    else
+        log "Copying WordPress files from ${WP_SOURCE} …"
+        # Use rsync-style copy without overwriting existing files in the volume
+        cp -rn "${WP_SOURCE}/." "${WP_DIR}/"
+        log "WordPress files copied."
+    fi
 else
-    log "Copying WordPress files from ${WP_SOURCE} …"
-    # Use rsync-style copy without overwriting existing files in the volume
-    cp -rn "${WP_SOURCE}/." "${WP_DIR}/"
-    log "WordPress files copied."
+    log "Using live WordPress files – skipping snapshot file copy."
 fi
 
 # ── 3. Import SQL dump ────────────────────────────────────────────────────────
@@ -191,22 +247,7 @@ else
 fi
 
 # ── 4. Patch wp-config.php ────────────────────────────────────────────────────
-if [ ! -f "${WP_DIR}/wp-config.php" ] && [ -f "${WP_DIR}/wp-config-sample.php" ]; then
-    log "Generating wp-config.php from sample …"
-    cp "${WP_DIR}/wp-config-sample.php" "${WP_DIR}/wp-config.php"
-fi
-
-if [ -f "${WP_DIR}/wp-config.php" ]; then
-    log "Patching database credentials in wp-config.php …"
-    sed -i "s|define[[:space:]]*([[:space:]]*'DB_NAME'[^)]*)|define('DB_NAME', '${WORDPRESS_DB_NAME}')|" \
-        "${WP_DIR}/wp-config.php"
-    sed -i "s|define[[:space:]]*([[:space:]]*'DB_USER'[^)]*)|define('DB_USER', '${WORDPRESS_DB_USER}')|" \
-        "${WP_DIR}/wp-config.php"
-    sed -i "s|define[[:space:]]*([[:space:]]*'DB_PASSWORD'[^)]*)|define('DB_PASSWORD', '${WORDPRESS_DB_PASSWORD}')|" \
-        "${WP_DIR}/wp-config.php"
-    sed -i "s|define[[:space:]]*([[:space:]]*'DB_HOST'[^)]*)|define('DB_HOST', 'db')|" \
-        "${WP_DIR}/wp-config.php"
-fi
+configure_wordpress
 
 # ── 5. Rewrite all URLs (handles serialized data and non-standard table prefix) ─
 OLD_URL=""

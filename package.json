@@ -15,7 +15,9 @@
     "nginx/default.conf",
     "README.md"
   ],
-  "scripts": {},
+  "scripts": {
+    "test": "python3 -m unittest discover -s tests -v"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/reenhanced/localwp-docker-compose.git"

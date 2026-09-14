@@ -4,5 +4,8 @@ docker-compose.override.yml
 # LocalWP zip files – potentially large; users add them locally
 import/*.zip
 
+# Python test caches
+__pycache__/
+
 # macOS
 .DS_Store

@@ -1,6 +1,6 @@
 # localwp-docker-compose
 
-Run [LocalWP](https://localwp.com/)-compatible zip files in Docker Compose — no LocalWP installation required.
+Run [LocalWP](https://localwp.com/)-compatible directories or zip files in Docker Compose — no LocalWP installation required. For local development only, not production.
 
 ## Install as a command (no `cd` required)
 
@@ -13,11 +13,96 @@ npm install -g git+https://github.com/reenhanced/localwp-docker-compose.git
 Then run from any directory:
 
 ```bash
-localwp-docker-compose /absolute/path/to/site.zip
+localwp-docker-compose --site /absolute/path/to/site.zip up
 # or from an expanded LocalWP export root:
 cd /path/to/site-folder
-localwp-docker-compose .
+localwp-docker-compose up --build # initial setup or migration
+# Later: localwp-docker-compose up (or up -d)
 ```
+
+## Commands
+
+Run `localwp-docker-compose` with no arguments (or `help`, `-h`, or `--help`)
+for usage information. Help does not require Docker or a site.
+
+```text
+localwp-docker-compose [--site PATH] COMMAND [ARGS...]
+```
+
+`--site PATH` selects an expanded LocalWP export or a zip file and must precede
+the command. The default is the current directory. Use the same site path for
+subsequent commands so they address the same Compose project.
+
+| Command | Behavior |
+|---------|----------|
+| `up [OPTIONS] [SERVICE...]` | Start and follow logs; on Ctrl+C, prompt to save before shutdown. Use `-d` / `--detach` for background operation without a prompt |
+| `down [OPTIONS]` | Stop and remove containers; preserve data volumes unless `-v` is passed |
+| `start`, `stop`, `restart` | Manage existing containers |
+| `logs [OPTIONS] [SERVICE...]` | View logs; use `-f` to follow |
+| `ps [OPTIONS]` | Show container status |
+| `build`, `pull` | Build or pull images |
+| `exec`, `run` | Execute commands in services |
+| `config` | Show resolved Compose configuration |
+| `session [UP OPTIONS]` | Start detached, follow logs, prompt to save, then shut down |
+| `save` | Directory: dump the running MySQL database to `app/sql/local.sql` only. Zip: replace the source archive with the running site's files and database |
+| `export [OUTPUT.zip]` | Export the running site; defaults to `./site-export.zip` |
+| `help [COMMAND]` | Show wrapper help or help for a Compose command |
+
+Other Compose commands and their arguments are forwarded to `docker compose`.
+Use `COMMAND --help` to see Compose's options. Compose global CLI flags are not
+accepted before the command; use environment variables such as `COMPOSE_PROFILES`
+for configuration. `LOCALWP_PROJECT_NAME` overrides the generated project name.
+
+```bash
+localwp-docker-compose up -d --build
+localwp-docker-compose logs -f
+localwp-docker-compose exec wordpress php --version
+localwp-docker-compose export /tmp/backup.zip
+localwp-docker-compose save
+localwp-docker-compose down
+```
+
+### What does “save” mean?
+
+- **Directory input:** files are already live on disk in `app/public/`. Saving
+  only dumps the running MySQL database to `app/sql/local.sql`; it never copies,
+  deletes, or replaces `app/public/`.
+- **Zip input:** runs as an isolated snapshot in Docker volumes. Saving replaces
+  the original zip with the running site's files and a fresh database dump.
+  Back up the original archive first; extract it and use directory mode for editor development.
+
+Use `export [OUTPUT.zip]` to write a separate backup archive (an existing output
+file will be overwritten).
+
+Foreground `up` follows logs until you press Ctrl+C, then explains saving, shows
+the destination, and asks for confirmation **while containers are still running**.
+Answering Yes saves before shutdown. No (the default, also used on end-of-input)
+only skips the database dump in directory mode: **it does not undo disk changes**.
+In zip mode, No leaves the source archive unchanged. Both choices then run `down`,
+preserving Docker data volumes; you can later start with `up -d` and run `save`.
+The database persists until `down -v`, which resets database/init state (and
+volume-backed zip files), but never deletes the bound directory's `app/public/`.
+
+`up -d` / `up --detach` (and Compose's `up --wait`) run noninteractively and never
+prompt or automatically shut down. Use `save` while the containers are running
+and then `down` when finished. `up --no-start` also passes through without a prompt.
+
+To allow saving before shutdown, foreground `up` uses detached startup followed
+by log streaming, as `session` does. This differs from raw Compose attachment;
+attached-only options such as `--abort-on-container-exit` and `--exit-code-from`
+are not supported in this workflow. Use raw Docker Compose for those options.
+
+Import archives are cached under
+`${XDG_CACHE_HOME:-$HOME/.cache}/localwp-docker-compose/` so detached containers
+retain their import mounts. This cache contains site files and database dumps;
+remove it only when the associated containers have been removed. Docker data
+volumes remain separate and are deleted only when requested (for example `down -v`).
+
+**Migrating from the old CLI:** replace `localwp-docker-compose PATH` with
+`localwp-docker-compose --site PATH session` to keep the interactive workflow,
+or use `--site PATH up` for the same save-on-exit workflow (`up -d` for background operation). Directory-based project names are
+unchanged; zip-based names now use the source path rather than a temporary
+extraction path, so old zip sessions' volumes are not automatically reused.
 
 ## Features
 
@@ -26,7 +111,7 @@ localwp-docker-compose .
 - **Site URL & WP-Admin URL** printed on every startup.
 - **Configurable PHP version** (7.4 – 8.3+).
 - **Apache or nginx** — switch with a single setting.
-- **Export** back to LocalWP-compatible zip with `./export.sh`.
+- **Export** back to LocalWP-compatible zip with `localwp-docker-compose export`.
 - **Override support** via `docker-compose.override.yml` (Traefik, custom labels, etc.).
 - **phpMyAdmin** available out of the box at <http://localhost:8081>.
 
@@ -46,21 +131,53 @@ cd localwp-docker-compose
 From the root of an expanded LocalWP export (directory containing `app/public`):
 
 ```bash
-/path/to/localwp-docker-compose/run.sh .
+cd /path/to/site-folder
+/path/to/localwp-docker-compose/run.sh up --build # initial setup or migration
+# Subsequent starts:
+/path/to/localwp-docker-compose/run.sh up # or up -d for background operation
+# Edit app/public/wp-content/themes/... or app/public/wp-content/plugins/...
 ```
 
-The command starts the stack, streams logs, and keeps your terminal attached.
-When you exit logs (`Ctrl+C`), it asks whether to save changes back into that
-directory (including a fresh `app/sql/local.sql` dump).
+Directory mode bind-mounts `app/public/` at `/var/www/html`: read-write for Apache
+and PHP-FPM, read-only for nginx. File creates, edits, and deletes are immediately
+shared between your editor and the runtime, including WordPress uploads and plugin
+changes. File edits need no rebuild or restart; usually refresh the browser.
+Frontend builds and plugin/browser caches still apply; the generated OPcache ini
+revalidates on every request.
+
+Foreground `up` streams logs; Ctrl+C prompts to save **only the database** before
+shutdown. `up -d` runs without a prompt; `session` provides the interactive workflow.
+
+**Migrating an existing directory site:** file changes in the old `wp_data` volume
+are not automatically migrated. **Before switching versions/mounts**, use the
+previous version's `export /path/to/backup.zip` command to back up the running site,
+then merge its files into your source as needed. The existing database and init
+marker are reused, with `wp_data` mounted at `/localwp-state`. Run `up --build` to
+rebuild images and recreate existing containers with the new initialization and
+mounts; `restart` does not activate these changes.
+
+Initialization patches `app/public/wp-config.php` and installs
+`app/public/wp-content/mu-plugins/localwp-autologin.php` on your actual disk;
+review your Git diff. On Linux, host IDs are applied to `www-data` to keep source
+files writable. Run the CLI as your normal non-root account (the current entrypoint
+requires nonzero UID/GID). The container entrypoint must start as root: do not
+override `user`. Docker Desktop must share the source directory, and overrides
+must not replace the generated `/var/www/html` mount.
 
 ### 3. Run against a LocalWP zip file directly
 
 ```bash
-./run.sh /absolute/path/to/my-site.zip
+./run.sh --site /absolute/path/to/my-site.zip up -d
 ```
 
-The zip is used as input for the run, and when the session ends you can choose
-to write all changes back into the same zip file.
+The zip is used as input. Save changes and stop the stack explicitly:
+
+```bash
+./run.sh --site /absolute/path/to/my-site.zip save
+./run.sh --site /absolute/path/to/my-site.zip down
+```
+
+Use `up` (without `-d`) or `session` if you want a save prompt when log streaming ends.
 
 ### 4. Alternative legacy flow: add your LocalWP zip to `import/`
 
@@ -97,7 +214,7 @@ Edit `.env` to set your preferences:
 | `MYSQL_PASSWORD`   | `wordpress`                | MySQL password                                 |
 | `MYSQL_ROOT_PASSWORD` | `rootpassword`          | MySQL root password                            |
 
-### 6. Start the site
+### 6. Start the site (legacy raw Compose flow)
 
 ```bash
 docker compose up
@@ -219,10 +336,14 @@ version control by `.gitignore`.
 Generate an updated LocalWP-compatible zip from the running site:
 
 ```bash
-./export.sh
-# or specify an output path:
-./export.sh /tmp/my-site-backup.zip
+localwp-docker-compose export
+# or specify a site and output path:
+localwp-docker-compose --site /path/to/site.zip export /tmp/my-site-backup.zip
 ```
+
+For the legacy flow started with `docker compose up` directly from this
+repository, continue to use `./export.sh [OUTPUT.zip]` instead. That script
+addresses the raw Compose project, not the CLI's site-specific project.
 
 The resulting zip can be imported back into LocalWP or any other tool that
 understands the `app/public` + `app/sql/local.sql` format.
@@ -233,20 +354,24 @@ understands the `app/public` + `app/sql/local.sql` format.
 
 ```bash
 # Stop (preserve data volumes)
-docker compose down
+localwp-docker-compose down
 
-# Stop and delete all data (volumes, images)
-docker compose down -v --rmi local
+# Stop and delete volumes and local images (not bound app/public files)
+localwp-docker-compose down -v --rmi local
 ```
 
 ---
+
+For a zip or a site outside the current directory, pass `--site PATH` before
+`down`. For the legacy repository flow, use `docker compose down` instead.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---------|-----|
-| No zip found on startup | Copy your `*.zip` into `import/` and run `docker compose up` |
-| Site URL wrong after import | Update `LOCAL_URL` in `.env` and delete the lock file: `docker compose run --rm wordpress rm /var/www/html/.localwp-docker-init-done`, then restart |
-| Plugin/theme updates fail | Ensure the `wp_data` volume has write access (runs as `www-data`) |
+| No zip found on startup (legacy raw Compose) | Copy your `*.zip` into `import/` and run `docker compose up` |
+| Site URL wrong after import (legacy raw Compose) | Update `LOCAL_URL` in `.env` and delete the lock file: `docker compose run --rm wordpress rm /var/www/html/.localwp-docker-init-done`, then restart |
+| Plugin/theme updates fail | Directory mode: check source permissions, run the CLI as a non-root account, and ensure Docker Desktop shares the source directory. Legacy/zip mode: check `wp_data` write access for `www-data` |
+| Directory edits not visible | Migrate with `up --build`, not `restart`; check the `/var/www/html` mount, frontend build output, and plugin/browser caches |
 | One-click URL not working | The token expired (1 hour); restart the container to generate a new one |
 | Rebuild not picking up PHP version change | Run `docker compose up --build` |
