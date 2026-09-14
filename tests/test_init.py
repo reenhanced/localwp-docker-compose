@@ -174,5 +174,21 @@ class InitTests(unittest.TestCase):
         self.assertEqual(self.calls.read_text(), "init\nupstream\n")
 
 
+class DockerfileTests(unittest.TestCase):
+    def test_base_image_uses_php_variant_tags(self):
+        from string import Template
+
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        image = next(line.split()[1] for line in dockerfile.splitlines()
+                     if line.startswith("FROM "))
+        for version in ("8.2", "8.3"):
+            for server in ("apache", "fpm"):
+                with self.subTest(version=version, server=server):
+                    self.assertEqual(
+                        Template(image).substitute(PHP_VERSION=version, WEB_SERVER=server),
+                        "wordpress:php" + version + "-" + server,
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

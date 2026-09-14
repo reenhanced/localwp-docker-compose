@@ -294,8 +294,10 @@ Then rebuild:
 docker compose up --build
 ```
 
-Supported tags mirror those on [Docker Hub for the `wordpress` image](https://hub.docker.com/_/wordpress/tags):
-`7.4`, `8.0`, `8.1`, `8.2`, `8.3`, etc.
+Set `PHP_VERSION` to the numeric PHP version (for example, `8.2` or `8.3`).
+The Dockerfile selects `wordpress:php8.2-apache` or `wordpress:php8.2-fpm`
+for PHP 8.2, depending on the web server. Available versions depend on the
+published [WordPress image tags](https://hub.docker.com/_/wordpress/tags).
 
 ---
 

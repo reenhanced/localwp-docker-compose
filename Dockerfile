@@ -1,7 +1,7 @@
 ARG PHP_VERSION=8.2
 ARG WEB_SERVER=apache
 
-FROM wordpress:${PHP_VERSION}-${WEB_SERVER}
+FROM wordpress:php${PHP_VERSION}-${WEB_SERVER}
 
 # Install MySQL client (needed by init.sh and export.sh inside the container),
 # unzip, and WP-CLI.
