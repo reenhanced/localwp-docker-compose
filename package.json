@@ -7,6 +7,7 @@
   },
   "files": [
     "run.sh",
+    "setup.py",
     "docker-compose.yml",
     "Dockerfile",
     "entrypoint.sh",

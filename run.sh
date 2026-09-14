@@ -51,6 +51,10 @@ export_site_state() {
     shift 2
 
     local compose_cmd=(docker compose --project-name "$compose_project")
+    local env_file
+    for env_file in "${ENV_FILES[@]}"; do
+        compose_cmd+=(--env-file "$env_file")
+    done
     local f
     for f in "$@"; do
         compose_cmd+=(-f "$f")
@@ -116,7 +120,7 @@ prompt_save() {
 
 usage() {
     cat <<'HELP'
-Usage: localwp-docker-compose [--site PATH] COMMAND [ARGS...]
+Usage: localwp-docker-compose [--site PATH] [--skip-setup] COMMAND [ARGS...]
 
 Run a LocalWP site with Docker Compose. PATH is an expanded export directory
 or a LocalWP zip file; it defaults to the current directory.
@@ -134,6 +138,7 @@ Compose commands:
   Other Compose commands are also forwarded to docker compose.
 
 LocalWP commands:
+  setup                       Configure the selected site's .env interactively
   session [UP OPTIONS]        Explicit interactive start/logs/save/shutdown workflow
   save                        Directory: dump database; zip: replace files + database
   export [OUTPUT.zip]         Export live data (default: ./site-export.zip)
@@ -141,15 +146,23 @@ LocalWP commands:
 
 Options:
   --site PATH                 Select the site (before COMMAND)
+  --skip-setup                Skip build setup; use saved .env and defaults
+                              Also accepted after build, up, or session
   -h, --help                  Show this help without requiring Docker
 
 Examples:
   localwp-docker-compose up
   localwp-docker-compose up -d --build
+  localwp-docker-compose build --skip-setup
   localwp-docker-compose logs -f wordpress
   localwp-docker-compose --site /path/to/site.zip up -d
   localwp-docker-compose --site /path/to/site.zip save
   localwp-docker-compose down
+
+Build and up/session --build prompt for setup. First up/session without a site
+.env also prompts. Use --skip-setup for unattended runs; it never overwrites .env.
+Directory sites use their own .env; zip sites use .env beside the source zip.
+Menus use Up/Down and Enter; text fields show saved defaults, passwords stay hidden.
 
 Use COMMAND --help for Compose command options. Compose global options must
 be configured through environment variables (for example COMPOSE_PROFILES).
@@ -161,16 +174,19 @@ database dump and does not undo file edits. Zip sites use isolated Docker files;
 save replaces the source zip with files + database, and No leaves it unchanged.
 Extract a zip to a directory first if you want live editor development.
 Both choices then shut down containers, preserving Docker data volumes.
-Detached up (-d / --detach, or --wait) does not prompt or shut down automatically.
+Detached up does not prompt to save or shut down automatically. Setup still
+runs when required; add --skip-setup to make builds noninteractive.
 Foreground up uses detached startup plus logs; attached-only Compose flags such
 as --abort-on-container-exit and --exit-code-from are not supported.
 HELP
 }
 
 TARGET_INPUT="$PWD"
+SKIP_SETUP=false
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -h|--help) usage; exit 0 ;;
+        --skip-setup) SKIP_SETUP=true; shift ;;
         --site)
             [ "$#" -ge 2 ] && [ -n "$2" ] || die "--site requires a path."
             TARGET_INPUT="$2"
@@ -192,6 +208,19 @@ if [ "$#" -eq 0 ]; then
 fi
 COMMAND="$1"
 shift
+if [ "$COMMAND" = "build" ] || [ "$COMMAND" = "up" ] || [ "$COMMAND" = "session" ]; then
+    command_args=()
+    parsing_options=true
+    for arg in "$@"; do
+        if [ "$parsing_options" = true ] && [ "$arg" = "--skip-setup" ]; then
+            SKIP_SETUP=true
+        else
+            command_args+=("$arg")
+            if [ "$arg" = "--" ]; then parsing_options=false; fi
+        fi
+    done
+    set -- "${command_args[@]}"
+fi
 case "$COMMAND" in
     help)
         if [ "$#" -eq 0 ]; then usage; exit 0; fi
@@ -200,6 +229,10 @@ case "$COMMAND" in
         ;;
     save) [ "$#" -eq 0 ] || die "Usage: localwp-docker-compose [--site PATH] save" ;;
     export) [ "$#" -le 1 ] || die "Usage: localwp-docker-compose [--site PATH] export [OUTPUT.zip]" ;;
+    setup)
+        if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then usage; exit 0; fi
+        [ "$#" -eq 0 ] || die "Usage: localwp-docker-compose [--site PATH] setup"
+        ;;
     session) ;;
     *)
         # Compose help and version do not need a valid site or import tools.
@@ -214,7 +247,7 @@ case "$COMMAND" in
         ;;
 esac
 
-require_cmd docker
+if [ "$COMMAND" != "setup" ]; then require_cmd docker; fi
 require_cmd python3
 
 # npm installs the command as a symlink outside the package directory.
@@ -255,6 +288,31 @@ else
     die "Target must be a LocalWP zip file or a directory containing app/public."
 fi
 
+if [ "$MODE" = "dir" ]; then
+    ENV_FILE="$SITE_ROOT/.env"
+else
+    ENV_FILE="$(dirname "$SOURCE_ZIP")/.env"
+fi
+
+NEEDS_SETUP=false
+case "$COMMAND" in
+    setup|build) NEEDS_SETUP=true ;;
+    up|session)
+        if [ ! -f "$ENV_FILE" ]; then NEEDS_SETUP=true; fi
+        for arg in "$@"; do
+            case "$arg" in
+                --) break ;;
+                --build|--build=true) NEEDS_SETUP=true ;;
+            esac
+        done
+        ;;
+esac
+if [ "$COMMAND" = "setup" ] || { [ "$NEEDS_SETUP" = true ] && [ "$SKIP_SETUP" = false ]; }; then
+    log "Configuring site environment: $ENV_FILE"
+    python3 "$SCRIPT_DIR/setup.py" "$ENV_FILE"
+fi
+if [ "$COMMAND" = "setup" ]; then exit 0; fi
+
 # Zip extraction paths are temporary; identify the project by its source instead.
 PROJECT_SOURCE="${SOURCE_ZIP:-$SOURCE_DIR}"
 safe_name=$(basename "$PROJECT_SOURCE" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')
@@ -268,6 +326,13 @@ IMPORT_ZIP="$IMPORT_DIR/site.zip"
 OVERRIDE_FILE="$RUNTIME_DIR/docker-compose.run.yml"
 
 mkdir -p "$IMPORT_DIR"
+# Explicit files prevent Compose from loading an unrelated working-directory
+# .env or the npm package's .env. Later files win; shell overrides still apply.
+DEFAULT_ENV_FILE="$RUNTIME_DIR/defaults.env"
+python3 "$SCRIPT_DIR/setup.py" --defaults "$DEFAULT_ENV_FILE"
+ENV_FILES=("$DEFAULT_ENV_FILE")
+if [ -f "$ENV_FILE" ]; then ENV_FILES+=("$ENV_FILE"); fi
+
 if [ "$COMMAND" = "up" ] || [ "$COMMAND" = "session" ] || [ "$COMMAND" = "run" ]; then
     require_cmd zip
     # Build a fresh archive so removed source files do not linger in the zip.
@@ -322,6 +387,9 @@ if [ -f "$SITE_OVERRIDE" ]; then
 fi
 
 compose_cmd=(docker compose --project-name "$PROJECT_NAME")
+for env_file in "${ENV_FILES[@]}"; do
+    compose_cmd+=(--env-file "$env_file")
+done
 for compose_file in "${COMPOSE_FILES[@]}"; do
     compose_cmd+=(-f "$compose_file")
 done

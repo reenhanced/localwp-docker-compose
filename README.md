@@ -26,7 +26,7 @@ Run `localwp-docker-compose` with no arguments (or `help`, `-h`, or `--help`)
 for usage information. Help does not require Docker or a site.
 
 ```text
-localwp-docker-compose [--site PATH] COMMAND [ARGS...]
+localwp-docker-compose [--site PATH] [--skip-setup] COMMAND [ARGS...]
 ```
 
 `--site PATH` selects an expanded LocalWP export or a zip file and must precede
@@ -43,10 +43,45 @@ subsequent commands so they address the same Compose project.
 | `build`, `pull` | Build or pull images |
 | `exec`, `run` | Execute commands in services |
 | `config` | Show resolved Compose configuration |
+| `setup` | Step through and save the selected site's configuration |
 | `session [UP OPTIONS]` | Start detached, follow logs, prompt to save, then shut down |
 | `save` | Directory: dump the running MySQL database to `app/sql/local.sql` only. Zip: replace the source archive with the running site's files and database |
 | `export [OUTPUT.zip]` | Export the running site; defaults to `./site-export.zip` |
 | `help [COMMAND]` | Show wrapper help or help for a Compose command |
+
+### Setup on build
+
+`build`, `up --build`, and `session --build` run an interactive setup before
+Docker starts. The first `up` or `session` for a site also runs setup when its
+`.env` does not exist. Use `localwp-docker-compose setup` at any time to change
+settings. Directory sites save `.env` at the site root; zip sites save it beside
+the zip. Site `.env` files are ignored by Git.
+
+The wizard asks for every saved setting:
+
+| Setting | Input |
+|---------|-------|
+| Web server | Arrow-key menu: Apache or nginx + PHP-FPM |
+| PHP version | Arrow-key menu of supported PHP versions; an existing custom version remains selectable |
+| Local URL, HTTP port, database name, database user | Editable text field prefilled from `.env` |
+| Database password, root password | Hidden field; Enter preserves the saved value |
+
+Existing `.env` values prefill the wizard. Press **Enter** to keep each value,
+then confirm the final save. Saved values take precedence over built-in defaults;
+shell variables still override them for Docker Compose and are identified by name
+in the wizard. Changing database credentials does not modify an existing database
+volume.
+
+For CI or other noninteractive uses, add `--skip-setup` before the command or
+after `build`, `up`, or `session`:
+
+```bash
+localwp-docker-compose up -d --build --skip-setup
+localwp-docker-compose --skip-setup build
+```
+
+Skipping setup never creates or overwrites `.env`; the command uses saved values
+when present and the normal defaults otherwise.
 
 Other Compose commands and their arguments are forwarded to `docker compose`.
 Use `COMMAND --help` to see Compose's options. Compose global CLI flags are not
@@ -201,7 +236,8 @@ my-site.zip
 
 ### 5. Configure (optional)
 
-Edit `.env` to set your preferences:
+The setup wizard creates this file during a build; rerun it with
+`localwp-docker-compose setup` to change values. You can also edit `.env` directly:
 
 | Variable           | Default                    | Description                                    |
 |--------------------|----------------------------|------------------------------------------------|

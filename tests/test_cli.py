@@ -30,7 +30,7 @@ with open(os.environ["DOCKER_RECORD"], "a", encoding="utf-8") as record:
 command = args
 if args[0] == "compose":
     command = args[1:]
-    while command and command[0] in ("--project-name", "-f"):
+    while command and command[0] in ("--project-name", "--env-file", "-f"):
         command = command[2:]
     if command[:2] == ["ps", "-q"]:
         print({"wordpress": "mock-wp", "db": "mock-db"}.get(command[2], ""))
@@ -78,6 +78,7 @@ class CLITests(unittest.TestCase):
         (self.site / "app" / "sql").mkdir()
         (self.site / "app" / "public" / "index.php").write_text("source wordpress")
         (self.site / "app" / "sql" / "local.sql").write_text("source sql")
+        (self.site / ".env").write_text("COMPOSE_PROFILES=apache\nPHP_VERSION=8.2\n")
         self.cwd = self.base / "working directory"
         self.cwd.mkdir()
         self.cache = self.base / "cache"
@@ -118,9 +119,14 @@ class CLITests(unittest.TestCase):
         digest = hashlib.sha1(str(source).encode()).hexdigest()[:8]
         # basename adds a newline before tr converts punctuation to hyphens.
         name = re.sub("[^a-z0-9]+", "-", source.name.lower() + "\n")
-        return ["compose", "--project-name", "localwp-" + name + "-" + digest,
-                "-f", str(ROOT / "docker-compose.yml"),
-                "-f", str(self.runtime(source) / "docker-compose.run.yml"), *args]
+        runtime = self.runtime(source)
+        env_file = source / ".env" if source.is_dir() else source.parent / ".env"
+        command = ["compose", "--project-name", "localwp-" + name + "-" + digest,
+                   "--env-file", str(runtime / "defaults.env")]
+        if env_file.exists():
+            command += ["--env-file", str(env_file)]
+        return [*command, "-f", str(ROOT / "docker-compose.yml"),
+                "-f", str(runtime / "docker-compose.run.yml"), *args]
 
     def assert_success(self, result):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -128,6 +134,7 @@ class CLITests(unittest.TestCase):
     def make_zip(self):
         self.require_tools("zip", "unzip")
         archive = self.base / "Export Site.zip"
+        (archive.parent / ".env").write_text("COMPOSE_PROFILES=apache\nPHP_VERSION=8.2\n")
         subprocess.run([str(self.bin / "zip"), "-qr", str(archive), "app"],
                        cwd=self.site, check=True, capture_output=True, timeout=15)
         return archive
@@ -206,7 +213,7 @@ class CLITests(unittest.TestCase):
         for source in (self.site, archive):
             with self.subTest(source=source):
                 self.clear_calls()
-                result = self.invoke("--site", source, "up", "--build", stdin="yes\n")
+                result = self.invoke("--site", source, "--skip-setup", "up", "--build", stdin="yes\n")
                 self.assert_success(result)
                 calls = self.calls()
                 self.assertEqual(calls[:2], [self.compose(source, "up", "-d", "--build"),
@@ -236,13 +243,34 @@ class CLITests(unittest.TestCase):
         self.assertIn("[y/N]", result.stdout)
         self.assertEqual(self.calls()[-1], self.compose(self.site, "down"))
 
+    def test_skip_setup_is_not_forwarded_and_never_creates_site_env(self):
+        self.require_tools("zip")
+        (self.site / ".env").unlink()
+        result = self.invoke("--site", self.site, "up", "-d", "--skip-setup")
+        self.assert_success(result)
+        self.assertFalse((self.site / ".env").exists())
+        self.assertEqual(self.calls(), [self.compose(self.site, "up", "-d")])
+        self.assertNotIn("Configuring site environment", result.stdout)
+
+    def test_build_requires_setup_without_a_tty_unless_skipped(self):
+        self.require_tools("zip")
+        result = self.invoke("--site", self.site, "build")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Configuring site environment", result.stdout)
+        self.assertIn("--skip-setup", result.stderr)
+        self.assertEqual(self.calls(), [])
+        self.clear_calls()
+        result = self.invoke("--site", self.site, "build", "--skip-setup", "wordpress")
+        self.assert_success(result)
+        self.assertEqual(self.calls(), [self.compose(self.site, "build", "wordpress")])
+
     def test_detached_up_arguments_are_unchanged(self):
         self.require_tools("zip")
         for flag in ("-d", "--detach", "--detach=true", "--wait", "--no-start"):
             with self.subTest(flag=flag):
                 self.clear_calls()
                 args = ("up", flag, "--build", "--scale", "wordpress=2", "wordpress")
-                result = self.invoke("--site=" + str(self.site), *args, stdin="y\n")
+                result = self.invoke("--site=" + str(self.site), "--skip-setup", *args, stdin="y\n")
                 self.assert_success(result)
                 self.assertEqual(self.calls(), [self.compose(self.site, *args)])
                 self.assertNotIn("[y/N]", result.stdout)
@@ -313,7 +341,7 @@ class CLITests(unittest.TestCase):
         for logs_status, expected in ((0, 0), (130, 0), (23, 23)):
             with self.subTest(logs_status=logs_status):
                 self.clear_calls()
-                result = self.invoke("--site", self.site, "session", "--build", "wordpress",
+                result = self.invoke("--site", self.site, "--skip-setup", "session", "--build", "wordpress",
                                      stdin="n\n", env={"DOCKER_EXIT_CODES": json.dumps({"logs": logs_status})})
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertEqual(self.calls(), [self.compose(self.site, "up", "-d", "--build", "wordpress"),
