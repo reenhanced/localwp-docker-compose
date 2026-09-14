@@ -361,11 +361,12 @@ Copy the example and customise it:
 cp docker-compose.override.yml.example docker-compose.override.yml
 ```
 
-Place `docker-compose.override.yml` in the site directory (next to `app/`) and
-the run script merges it automatically as the last compose file, so its values
-win. When running `docker compose` by hand from this repository, Docker Compose
-merges an override in this directory on its own. The file is excluded from
-version control by `.gitignore`.
+Place `docker-compose.override.yml` in the directory you run the command from
+(or in the directory passed to `--site`). The run script merges it automatically
+as the last compose file, so its values win. This also works when the LocalWP
+`app/public` directory is nested within that project directory. For zip sites,
+place the override beside the source zip. The file is excluded from version
+control by `.gitignore`.
 
 ---
 

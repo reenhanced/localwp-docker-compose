@@ -298,6 +298,24 @@ class CLITests(unittest.TestCase):
         self.assert_success(self.invoke("--site", relative, "down"))
         self.assertEqual(self.calls(), [self.compose(self.site, "down")])
 
+    def test_override_in_selected_directory_is_passed_to_compose(self):
+        project = self.base / "Customer Service"
+        site = project / "localwp-export"
+        (site / "app" / "public").mkdir(parents=True)
+        (site / "app" / "sql").mkdir()
+        (project / "docker-compose.override.yml").write_text(
+            "services:\n  wordpress:\n    labels:\n      traefik.enable: 'true'\n")
+
+        result = self.invoke("config", cwd=project)
+        self.assert_success(result)
+
+        expected = self.compose(site, "config")
+        expected.insert(-1, "-f")
+        expected.insert(-1, str(project / "docker-compose.override.yml"))
+        self.assertEqual(self.calls(), [expected])
+        self.assertIn("Using site override: " + str(project / "docker-compose.override.yml"),
+                      result.stdout)
+
     def test_zip_identity_is_stable_and_import_survives_commands(self):
         archive = self.make_zip()
         original = archive.read_bytes()

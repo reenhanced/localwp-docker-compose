@@ -374,15 +374,16 @@ Path(output).write_text(json.dumps({"services": services}, indent=2) + "\n")
 PY
 
 # Compose only auto-merges docker-compose.override.yml when it discovers the
-# files itself; explicit -f flags disable that, so add the site's override here.
+# files itself; explicit -f flags disable that. For directory sites, use the
+# selected directory rather than a nested app/public root discovered within it.
 COMPOSE_FILES=("$SCRIPT_DIR/docker-compose.yml" "$OVERRIDE_FILE")
-SITE_OVERRIDE="$SITE_ROOT/docker-compose.override.yml"
+if [ "$MODE" = "dir" ]; then
+    SITE_OVERRIDE="$TARGET_INPUT/docker-compose.override.yml"
+else
+    SITE_OVERRIDE="$(dirname "$SOURCE_ZIP")/docker-compose.override.yml"
+fi
 if [ -f "$SITE_OVERRIDE" ]; then
     log "Using site override: $SITE_OVERRIDE"
-    if [ "$MODE" = "zip" ]; then
-        cp "$SITE_OVERRIDE" "$RUNTIME_DIR/docker-compose.override.yml"
-        SITE_OVERRIDE="$RUNTIME_DIR/docker-compose.override.yml"
-    fi
     COMPOSE_FILES+=("$SITE_OVERRIDE")
 fi
 
