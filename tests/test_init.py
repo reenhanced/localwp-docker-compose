@@ -32,7 +32,29 @@ class InitTests(unittest.TestCase):
                         WORDPRESS_DB_NAME="wordpress")
         for name in ("chown", "chmod", "mysqladmin", "groupmod", "usermod"):
             self.mock(name, 'printf "%s\\n" "' + name + ' $*" >> "$CALLS"')
-        self.mock("mysql", 'echo "mysql $*" >> "$CALLS"; if [ "$1" = "-h" ] && [ "$#" = 5 ]; then cat >> "$CALLS"; fi; exit "${MYSQL_FAIL:-0}"')
+        self.mock("mysql", '''echo "mysql $*" >> "$CALLS"
+case " $* " in
+    *" --skip-ssl-verify-server-cert "*) ;;
+    *) echo "TLS/SSL error: self-signed certificate in certificate chain" >&2; exit 1 ;;
+esac
+case "$*" in
+    *"SELECT 1"*)
+        if [ "${MYSQL_WAIT_FAIL:-0}" = 1 ]; then
+            echo "Access denied for user wordpress" >&2
+            exit 1
+        fi
+        if [ "${MYSQL_WAIT_ONCE:-0}" = 1 ] && [ ! -f "$CALLS.ready" ]; then
+            touch "$CALLS.ready"
+            echo "Cannot connect to MySQL server" >&2
+            exit 1
+        fi
+        exit 0 ;;
+    *"UPDATE "*) ;;
+    *) cat >> "$CALLS" ;;
+esac
+exit "${MYSQL_FAIL:-0}"
+''')
+        self.mock("sleep", ':')
         self.mock("wp", 'echo "wp $*" >> "$CALLS"; case "$*" in *"option get siteurl"*) echo http://localhost:8080;; esac')
         self.mock("id", 'echo 0')
         self.mock("getent", 'echo "www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin"')
@@ -102,6 +124,35 @@ class InitTests(unittest.TestCase):
     def test_source_marker_does_not_skip_new_database_import(self):
         (self.wp / ".localwp-docker-init-done").touch()
         self.assertIn("IMPORT_SENTINEL", self.run_init())
+
+    def test_readiness_and_import_share_local_tls_options(self):
+        calls = self.run_init()
+        queries = [line for line in calls.splitlines() if line.startswith("mysql ")]
+        self.assertEqual(len(queries), 2)
+        for query in queries:
+            self.assertIn("--skip-ssl-verify-server-cert --connect-timeout=5", query)
+            self.assertIn("-h db -uwordpress -psecret wordpress", query)
+        self.assertIn("SELECT 1", queries[0])
+        self.assertNotIn("mysqladmin", calls)
+
+    def test_readiness_reports_errors_and_recovers(self):
+        self.env["MYSQL_WAIT_ONCE"] = "1"
+        result = subprocess.run(["bash", str(self.script)], env=self.env,
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Cannot connect to MySQL server", result.stderr)
+        self.assertIn("MySQL is ready.", result.stdout)
+        self.assertEqual(self.calls.read_text().count("SELECT 1"), 2)
+
+    def test_readiness_auth_failure_is_bounded_and_reported(self):
+        self.env["MYSQL_WAIT_FAIL"] = "1"
+        result = subprocess.run(["bash", str(self.script)], env=self.env,
+                                text=True, capture_output=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Last connection error: Access denied", result.stderr)
+        self.assertEqual(self.calls.read_text().count("SELECT 1"), 60)
+        self.assertNotIn("IMPORT_SENTINEL", self.calls.read_text())
+        self.assertFalse((self.state / ".localwp-docker-init-done").exists())
 
     def test_failed_import_does_not_create_marker(self):
         self.env["MYSQL_FAIL"] = "1"

@@ -29,17 +29,28 @@ LOCAL_URL="${LOCAL_URL%/}"
 log()  { echo "[localwp-init] $*"; }
 warn() { echo "[localwp-init] WARNING: $*" >&2; }
 
+mysql_local() {
+    # The bundled development MySQL server uses a self-signed certificate.
+    # New MariaDB clients verify it by default; keep TLS, but skip verification
+    # for this local Compose connection (not for production database use).
+    mysql --skip-ssl-verify-server-cert --connect-timeout=5 \
+          -h db -u"${WORDPRESS_DB_USER}" -p"${WORDPRESS_DB_PASSWORD}" \
+          "${WORDPRESS_DB_NAME}" "$@"
+}
+
 # ── Wait for MySQL ─────────────────────────────────────────────────────────────
 wait_for_mysql() {
     log "Waiting for MySQL …"
-    local retries=60
-    until mysqladmin ping -h db \
-          -u"${WORDPRESS_DB_USER}" \
-          -p"${WORDPRESS_DB_PASSWORD}" \
-          --silent 2>/dev/null; do
+    local retries=60 error
+    # mysqladmin ping can succeed even when authentication fails. Test access
+    # to the actual WordPress database instead, and surface connection errors.
+    until error=$(mysql_local --batch --skip-column-names -e 'SELECT 1' 2>&1); do
+        if [ "$retries" -eq 60 ]; then
+            warn "Database connection failed; retrying: $error"
+        fi
         retries=$((retries - 1))
         [ "$retries" -le 0 ] && {
-            warn "MySQL did not become ready in time. Aborting."
+            warn "MySQL did not become ready in time. Last connection error: $error"
             exit 1
         }
         sleep 2
@@ -237,10 +248,7 @@ wait_for_mysql
 
 if [ -n "$SQL_FILE" ]; then
     log "Importing SQL dump: ${SQL_FILE} …"
-    mysql -h db \
-          -u"${WORDPRESS_DB_USER}" \
-          -p"${WORDPRESS_DB_PASSWORD}" \
-          "${WORDPRESS_DB_NAME}" < "$SQL_FILE"
+    mysql_local < "$SQL_FILE"
     log "SQL import complete."
 else
     warn "No SQL dump found in the zip – the database will be empty."
@@ -271,11 +279,7 @@ elif [ -z "$OLD_URL" ]; then
     # Read table_prefix from wp-config.php (defaults to wp_)
     TABLE_PREFIX=$(grep -oP "(?<=table_prefix\s=\s')[^']+" "${WP_DIR}/wp-config.php" 2>/dev/null || echo "wp_")
     log "Updating siteurl and home in ${TABLE_PREFIX}options …"
-    mysql -h db \
-          -u"${WORDPRESS_DB_USER}" \
-          -p"${WORDPRESS_DB_PASSWORD}" \
-          "${WORDPRESS_DB_NAME}" \
-          -e "UPDATE \`${TABLE_PREFIX}options\`
+    mysql_local -e "UPDATE \`${TABLE_PREFIX}options\`
               SET option_value='${LOCAL_URL}'
               WHERE option_name IN ('siteurl','home');" 2>/dev/null \
         || warn "Could not update siteurl/home."

@@ -371,9 +371,14 @@ For a zip or a site outside the current directory, pass `--site PATH` before
 
 | Symptom | Fix |
 |---------|-----|
+| Stuck at “Waiting for MySQL” | Run `localwp-docker-compose up --build` to use the current client settings. Read the reported connection error; check database credentials if access is denied. Do not delete volumes to fix a connection error |
 | No zip found on startup (legacy raw Compose) | Copy your `*.zip` into `import/` and run `docker compose up` |
 | Site URL wrong after import (legacy raw Compose) | Update `LOCAL_URL` in `.env` and delete the lock file: `docker compose run --rm wordpress rm /var/www/html/.localwp-docker-init-done`, then restart |
 | Plugin/theme updates fail | Directory mode: check source permissions, run the CLI as a non-root account, and ensure Docker Desktop shares the source directory. Legacy/zip mode: check `wp_data` write access for `www-data` |
 | Directory edits not visible | Migrate with `up --build`, not `restart`; check the `/var/www/html` mount, frontend build output, and plugin/browser caches |
 | One-click URL not working | The token expired (1 hour); restart the container to generate a new one |
 | Rebuild not picking up PHP version change | Run `docker compose up --build` |
+
+The initialization client accepts the bundled MySQL server's self-signed TLS
+certificate on the local Compose network. TLS remains enabled, but certificate
+verification is skipped; this setting is for local development, not production.
