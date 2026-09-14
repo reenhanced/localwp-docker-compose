@@ -50,6 +50,7 @@ subsequent commands so they address the same Compose project.
 | `save` | Directory: dump the running MySQL database to `app/sql/local.sql` only. Zip: replace the source archive with the running site's files and database |
 | `export [OUTPUT.zip]` | Export the running site; defaults to `./site-export.zip` |
 | `info` | Show the site, WP-Admin, phpMyAdmin, and a fresh one-click admin URL |
+| `wp-cli COMMAND [ARGS...]` | Run WP-CLI in the running WordPress container |
 | `help [COMMAND]` | Show wrapper help or help for a Compose command |
 
 ### Setup on build
@@ -95,6 +96,7 @@ for configuration. `LOCALWP_PROJECT_NAME` overrides the generated project name.
 localwp-docker-compose up -d --build
 localwp-docker-compose logs -f
 localwp-docker-compose info
+ldc wp-cli option get home
 localwp-docker-compose exec wordpress php --version
 localwp-docker-compose export /tmp/backup.zip
 localwp-docker-compose save
@@ -186,6 +188,18 @@ revalidates on every request.
 
 Foreground `up` streams logs; Ctrl+C prompts to save **only the database** before
 shutdown. `up -d` runs without a prompt; `session` provides the interactive workflow.
+
+### WP-CLI
+
+Use `ldc wp-cli` (or `localwp-docker-compose wp-cli`) to run WP-CLI against the
+currently running site. It works with both Apache and nginx/PHP-FPM profiles:
+
+```bash
+ldc wp-cli option get home
+ldc wp-cli plugin list
+ldc wp-cli search-replace 'https://old.example' 'https://new.example' --dry-run
+```
+
 
 **Migrating an existing directory site:** file changes in the old `wp_data` volume
 are not automatically migrated. **Before switching versions/mounts**, use the

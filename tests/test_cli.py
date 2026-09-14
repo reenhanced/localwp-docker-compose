@@ -291,6 +291,19 @@ class CLITests(unittest.TestCase):
                       result.stdout)
         self.assertIn("phpMyAdmin: http://localhost:8081/", result.stdout)
 
+    def test_wp_cli_runs_in_the_active_wordpress_container(self):
+        result = self.invoke("--site", self.site, "wp-cli", "option", "get", "home")
+        self.assert_success(result)
+        self.assertEqual(self.calls(), [self.compose(self.site, "ps", "-q", "wordpress"),
+                                        ["exec", "-i", "mock-wp", "wp", "--path=/var/www/html",
+                                         "--allow-root", "option", "get", "home"]])
+
+    def test_wp_cli_requires_a_command(self):
+        result = self.invoke("--site", self.site, "wp-cli")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("wp-cli COMMAND [ARGS...]", result.stderr)
+        self.assertEqual(self.calls(), [])
+
     def test_passthrough_preserves_arguments_and_exit_status(self):
         cases = [("down", "--volumes", "--remove-orphans"),
                  ("logs", "-f", "--tail", "12", "wordpress"),

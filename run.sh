@@ -92,14 +92,20 @@ dump_database() {
     docker exec "$db_container" mysqldump -u"$db_user" -p"$db_pass" "$db_name" > "$output_path"
 }
 
+wordpress_container() {
+    local container
+    container=$("${compose_cmd[@]}" ps -q wordpress 2>/dev/null | head -n1 || true)
+    if [ -z "$container" ]; then
+        container=$("${compose_cmd[@]}" ps -q wordpress-fpm 2>/dev/null | head -n1 || true)
+    fi
+    [ -n "$container" ] || die "Could not find a running WordPress container."
+    echo "$container"
+}
+
 site_info() {
     local wp_container details site_url admin_url login_url
     local -a detail_lines
-    wp_container=$("${compose_cmd[@]}" ps -q wordpress 2>/dev/null | head -n1 || true)
-    if [ -z "$wp_container" ]; then
-        wp_container=$("${compose_cmd[@]}" ps -q wordpress-fpm 2>/dev/null | head -n1 || true)
-    fi
-    [ -n "$wp_container" ] || die "Could not find a running WordPress container."
+    wp_container=$(wordpress_container)
 
     if ! details=$(docker exec "$wp_container" wp --path=/var/www/html --allow-root eval '
 $admins = get_users(["role" => "administrator", "number" => 1, "fields" => "ID"]);
@@ -126,6 +132,13 @@ if ($token) { echo add_query_arg("localwp_autologin", $token, home_url("/")); }
         echo "One-click admin: unavailable (no administrator account found)"
     fi
     echo "phpMyAdmin: http://localhost:8081/"
+}
+
+wp_cli() {
+    local wp_container
+    [ "$#" -gt 0 ] || die "Usage: localwp-docker-compose [--site PATH] wp-cli COMMAND [ARGS...]"
+    wp_container=$(wordpress_container)
+    docker exec -i "$wp_container" wp --path=/var/www/html --allow-root "$@"
 }
 
 prompt_save() {
@@ -179,6 +192,7 @@ LocalWP commands:
   save                        Directory: dump database; zip: replace files + database
   export [OUTPUT.zip]         Export live data (default: ./site-export.zip)
   info                        Show site, admin, and one-click login URLs
+  wp-cli COMMAND [ARGS...]    Run WP-CLI in the running WordPress container
   help                        Show this help; help COMMAND shows Compose help
 
 Options:
@@ -196,25 +210,6 @@ Examples:
   localwp-docker-compose --site /path/to/site.zip save
   localwp-docker-compose down
 
-Build and up/session --build prompt for setup. First up/session without a site
-.env also prompts. Use --skip-setup for unattended runs; it never overwrites .env.
-Directory sites use their own .env; zip sites use .env beside the source zip.
-Menus use Up/Down and Enter; text fields show saved defaults, passwords stay hidden.
-
-Use COMMAND --help for Compose command options. Compose global options must
-be configured through environment variables (for example COMPOSE_PROFILES).
-Set LOCALWP_PROJECT_NAME to override the automatically generated project name.
-Foreground up keeps containers running until you answer the save prompt after
-Ctrl+C. Directory sites use live app/public bind mounts: editor and WordPress
-file changes are immediate. Save only updates app/sql/local.sql; No skips that
-database dump and does not undo file edits. Zip sites use isolated Docker files;
-save replaces the source zip with files + database, and No leaves it unchanged.
-Extract a zip to a directory first if you want live editor development.
-Both choices then shut down containers, preserving Docker data volumes.
-Detached up does not prompt to save or shut down automatically. Setup still
-runs when required; add --skip-setup to make builds noninteractive.
-Foreground up uses detached startup plus logs; attached-only Compose flags such
-as --abort-on-container-exit and --exit-code-from are not supported.
 HELP
 }
 
@@ -267,6 +262,7 @@ case "$COMMAND" in
     save) [ "$#" -eq 0 ] || die "Usage: localwp-docker-compose [--site PATH] save" ;;
     export) [ "$#" -le 1 ] || die "Usage: localwp-docker-compose [--site PATH] export [OUTPUT.zip]" ;;
     info) [ "$#" -eq 0 ] || die "Usage: localwp-docker-compose [--site PATH] info" ;;
+    wp-cli) [ "$#" -gt 0 ] || die "Usage: localwp-docker-compose [--site PATH] wp-cli COMMAND [ARGS...]" ;;
     setup)
         if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then usage; exit 0; fi
         [ "$#" -eq 0 ] || die "Usage: localwp-docker-compose [--site PATH] setup"
@@ -464,6 +460,7 @@ fi
 case "$COMMAND" in
     save) save_source; exit 0 ;;
     info) site_info; exit 0 ;;
+    wp-cli) wp_cli "$@"; exit $? ;;
     export)
         require_cmd zip
         output_path=$(resolve_abs_path "${1:-site-export.zip}")
