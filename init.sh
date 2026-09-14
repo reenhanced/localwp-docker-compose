@@ -158,7 +158,7 @@ print_banner() {
     echo "╠══════════════════════════════════════════════════════════════════╣"
     echo "║  phpMyAdmin     : http://localhost:8081/                        ║"
     echo "╠══════════════════════════════════════════════════════════════════╣"
-    echo "║  Run './export.sh' to create an updated LocalWP-compatible zip  ║"
+    echo "║  Run 'localwp-docker-compose export' to create an updated zip   ║"
     echo "╚══════════════════════════════════════════════════════════════════╝"
     echo ""
 }

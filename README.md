@@ -10,10 +10,12 @@ Install globally:
 npm install -g git+https://github.com/reenhanced/localwp-docker-compose.git
 ```
 
-Then run from any directory:
+Then run from any directory. `ldc` is a short alias for
+`localwp-docker-compose`:
 
 ```bash
 localwp-docker-compose --site /absolute/path/to/site.zip up
+# equivalent: ldc --site /absolute/path/to/site.zip up
 # or from an expanded LocalWP export root:
 cd /path/to/site-folder
 localwp-docker-compose up --build # initial setup or migration
@@ -47,6 +49,7 @@ subsequent commands so they address the same Compose project.
 | `session [UP OPTIONS]` | Start detached, follow logs, prompt to save, then shut down |
 | `save` | Directory: dump the running MySQL database to `app/sql/local.sql` only. Zip: replace the source archive with the running site's files and database |
 | `export [OUTPUT.zip]` | Export the running site; defaults to `./site-export.zip` |
+| `info` | Show the site, WP-Admin, phpMyAdmin, and a fresh one-click admin URL |
 | `help [COMMAND]` | Show wrapper help or help for a Compose command |
 
 ### Setup on build
@@ -91,6 +94,7 @@ for configuration. `LOCALWP_PROJECT_NAME` overrides the generated project name.
 ```bash
 localwp-docker-compose up -d --build
 localwp-docker-compose logs -f
+localwp-docker-compose info
 localwp-docker-compose exec wordpress php --version
 localwp-docker-compose export /tmp/backup.zip
 localwp-docker-compose save
@@ -284,7 +288,7 @@ After a successful start you will see something like:
 ╠══════════════════════════════════════════════════════════════════╣
 ║  phpMyAdmin     : http://localhost:8081/                        ║
 ╠══════════════════════════════════════════════════════════════════╣
-║  Run './export.sh' to create an updated LocalWP-compatible zip  ║
+║  Run 'localwp-docker-compose export' to create an updated zip   ║
 ╚══════════════════════════════════════════════════════════════════╝
 ```
 

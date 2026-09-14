@@ -47,6 +47,8 @@ elif args[:3] == ["exec", "mock-db", "printenv"]:
            "MYSQL_PASSWORD": "password"}[args[3]])
 elif args[:3] == ["exec", "mock-db", "mysqldump"]:
     print("-- mock database dump")
+elif args[:3] == ["exec", "mock-wp", "wp"]:
+    print("https://site.test\nhttps://site.test/wp-admin/\nhttps://site.test/?localwp_autologin=token")
 if command[0] == "logs" and os.environ.get("MOCK_INTERRUPT_LOGS"):
     import signal
     os.kill(os.getppid(), signal.SIGINT)
@@ -274,6 +276,20 @@ class CLITests(unittest.TestCase):
                 self.assert_success(result)
                 self.assertEqual(self.calls(), [self.compose(self.site, *args)])
                 self.assertNotIn("[y/N]", result.stdout)
+
+    def test_info_prints_fresh_one_click_admin_url(self):
+        result = self.invoke("--site", self.site, "info")
+        self.assert_success(result)
+        calls = self.calls()
+        self.assertEqual(calls[0], self.compose(self.site, "ps", "-q", "wordpress"))
+        self.assertEqual(calls[1][:-1], ["exec", "mock-wp", "wp", "--path=/var/www/html",
+                                         "--allow-root", "eval"])
+        self.assertIn("localwp_autologin_", calls[1][-1])
+        self.assertIn("Site URL: https://site.test", result.stdout)
+        self.assertIn("WP-Admin: https://site.test/wp-admin/", result.stdout)
+        self.assertIn("One-click admin: https://site.test/?localwp_autologin=token",
+                      result.stdout)
+        self.assertIn("phpMyAdmin: http://localhost:8081/", result.stdout)
 
     def test_passthrough_preserves_arguments_and_exit_status(self):
         cases = [("down", "--volumes", "--remove-orphans"),

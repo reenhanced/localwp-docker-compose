@@ -92,6 +92,42 @@ dump_database() {
     docker exec "$db_container" mysqldump -u"$db_user" -p"$db_pass" "$db_name" > "$output_path"
 }
 
+site_info() {
+    local wp_container details site_url admin_url login_url
+    local -a detail_lines
+    wp_container=$("${compose_cmd[@]}" ps -q wordpress 2>/dev/null | head -n1 || true)
+    if [ -z "$wp_container" ]; then
+        wp_container=$("${compose_cmd[@]}" ps -q wordpress-fpm 2>/dev/null | head -n1 || true)
+    fi
+    [ -n "$wp_container" ] || die "Could not find a running WordPress container."
+
+    if ! details=$(docker exec "$wp_container" wp --path=/var/www/html --allow-root eval '
+$admins = get_users(["role" => "administrator", "number" => 1, "fields" => "ID"]);
+$token = "";
+if ($admins) {
+    $token = wp_generate_password(32, false);
+    set_transient("localwp_autologin_" . $token, $admins[0], HOUR_IN_SECONDS);
+}
+echo home_url() . "\n" . admin_url() . "\n";
+if ($token) { echo add_query_arg("localwp_autologin", $token, home_url("/")); }
+'); then
+        die "Could not retrieve site information from the WordPress container."
+    fi
+    mapfile -t detail_lines <<< "$details"
+    site_url="${detail_lines[0]:-}"
+    admin_url="${detail_lines[1]:-}"
+    login_url="${detail_lines[2]:-}"
+
+    echo "Site URL: $site_url"
+    echo "WP-Admin: $admin_url"
+    if [ -n "$login_url" ]; then
+        echo "One-click admin: $login_url"
+    else
+        echo "One-click admin: unavailable (no administrator account found)"
+    fi
+    echo "phpMyAdmin: http://localhost:8081/"
+}
+
 prompt_save() {
     local reply=""
     echo
@@ -142,6 +178,7 @@ LocalWP commands:
   session [UP OPTIONS]        Explicit interactive start/logs/save/shutdown workflow
   save                        Directory: dump database; zip: replace files + database
   export [OUTPUT.zip]         Export live data (default: ./site-export.zip)
+  info                        Show site, admin, and one-click login URLs
   help                        Show this help; help COMMAND shows Compose help
 
 Options:
@@ -229,6 +266,7 @@ case "$COMMAND" in
         ;;
     save) [ "$#" -eq 0 ] || die "Usage: localwp-docker-compose [--site PATH] save" ;;
     export) [ "$#" -le 1 ] || die "Usage: localwp-docker-compose [--site PATH] export [OUTPUT.zip]" ;;
+    info) [ "$#" -eq 0 ] || die "Usage: localwp-docker-compose [--site PATH] info" ;;
     setup)
         if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then usage; exit 0; fi
         [ "$#" -eq 0 ] || die "Usage: localwp-docker-compose [--site PATH] setup"
@@ -425,6 +463,7 @@ fi
 
 case "$COMMAND" in
     save) save_source; exit 0 ;;
+    info) site_info; exit 0 ;;
     export)
         require_cmd zip
         output_path=$(resolve_abs_path "${1:-site-export.zip}")

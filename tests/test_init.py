@@ -114,6 +114,13 @@ exit "${MYSQL_FAIL:-0}"
         self.assertEqual(self.run_init().count("IMPORT_SENTINEL"), 2)
         self.assertFalse((self.wp / "index.php").exists())
 
+    def test_banner_recommends_cli_export(self):
+        result = subprocess.run(["bash", str(self.script)], env=self.env,
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("localwp-docker-compose export", result.stdout)
+        self.assertNotIn("./export.sh", result.stdout)
+
     def test_legacy_volume_marker_skips_import_but_patches_live_config(self):
         (self.state / ".localwp-docker-init-done").touch()
         (self.wp / "wp-config.php").write_text(self.config)

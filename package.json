@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "Run [LocalWP](https://localwp.com/)-compatible zip files in Docker Compose — no LocalWP installation required.",
   "bin": {
-    "localwp-docker-compose": "./run.sh"
+    "localwp-docker-compose": "./run.sh",
+    "ldc": "./run.sh"
   },
   "files": [
     "run.sh",
