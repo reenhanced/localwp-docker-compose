@@ -206,8 +206,11 @@ Copy the example and customise it:
 cp docker-compose.override.yml.example docker-compose.override.yml
 ```
 
-`docker-compose.override.yml` is automatically merged by Docker Compose and is
-excluded from version control by `.gitignore`.
+Place `docker-compose.override.yml` in the site directory (next to `app/`) and
+the run script merges it automatically as the last compose file, so its values
+win. When running `docker compose` by hand from this repository, Docker Compose
+merges an override in this directory on its own. The file is excluded from
+version control by `.gitignore`.
 
 ---
 

@@ -2,7 +2,9 @@
 # docker-compose.override.yml.example
 #
 # Copy this file to docker-compose.override.yml to customise the deployment.
-# docker-compose.override.yml is automatically merged by Docker Compose.
+# Place it in the site directory (next to app/); the run script merges it
+# automatically. When running docker compose by hand from this directory,
+# Docker Compose merges it on its own.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -13,7 +15,9 @@ services:
 
   wordpress:
     # Remove the direct port binding when Traefik is in front
-    ports: []
+    # !reset is required: a plain empty list merges with (and keeps) the
+    # base file's port binding instead of removing it.
+    ports: !reset []
     networks:
       - default
       - traefik

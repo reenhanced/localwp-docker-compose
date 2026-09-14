@@ -47,10 +47,14 @@ build_import_zip() {
 
 export_site_state() {
     local compose_project="$1"
-    local compose_files=("$2" "$3")
-    local output_path="$4"
+    local output_path="$2"
+    shift 2
 
-    local compose_cmd=(docker compose --project-name "$compose_project" -f "${compose_files[0]}" -f "${compose_files[1]}")
+    local compose_cmd=(docker compose --project-name "$compose_project")
+    local f
+    for f in "$@"; do
+        compose_cmd+=(-f "$f")
+    done
 
     local wp_container
     wp_container=$("${compose_cmd[@]}" ps -q wordpress 2>/dev/null | head -n1 || true)
@@ -175,7 +179,19 @@ services:
       - $IMPORT_DIR:/import:ro
 OVERRIDE
 
-compose_cmd=(docker compose --project-name "$PROJECT_NAME" -f "$SCRIPT_DIR/docker-compose.yml" -f "$OVERRIDE_FILE")
+# Compose only auto-merges docker-compose.override.yml when it discovers the
+# files itself; explicit -f flags disable that, so add the site's override here.
+COMPOSE_FILES=("$SCRIPT_DIR/docker-compose.yml" "$OVERRIDE_FILE")
+SITE_OVERRIDE="$SITE_ROOT/docker-compose.override.yml"
+if [ -f "$SITE_OVERRIDE" ]; then
+    log "Using site override: $SITE_OVERRIDE"
+    COMPOSE_FILES+=("$SITE_OVERRIDE")
+fi
+
+compose_cmd=(docker compose --project-name "$PROJECT_NAME")
+for compose_file in "${COMPOSE_FILES[@]}"; do
+    compose_cmd+=(-f "$compose_file")
+done
 
 cleanup() {
     rm -rf "$RUNTIME_DIR"
@@ -204,7 +220,7 @@ saved=false
 if prompt_save; then
     tmp_export_zip="$RUNTIME_DIR/export.zip"
     log "Exporting current site state …"
-    export_site_state "$PROJECT_NAME" "$SCRIPT_DIR/docker-compose.yml" "$OVERRIDE_FILE" "$tmp_export_zip"
+    export_site_state "$PROJECT_NAME" "$tmp_export_zip" "${COMPOSE_FILES[@]}"
 
     if [ "$MODE" = "zip" ]; then
         cp "$tmp_export_zip" "$SOURCE_ZIP"
